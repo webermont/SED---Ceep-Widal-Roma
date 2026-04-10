@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the system (Coordinator or Teacher)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["coordenador", "professor"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Turma": {
+      "title": "Turma",
+      "description": "A class of students",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "ano": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["nome", "ano", "createdAt", "createdBy"]
+    },
+    "Aluno": {
+      "title": "Aluno",
+      "description": "A student",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "matricula": { "type": "string" },
+        "turmaId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["nome", "matricula", "turmaId", "createdAt", "createdBy"]
+    },
+    "Avaliacao": {
+      "title": "Avaliacao",
+      "description": "An assessment (test or mock exam)",
+      "type": "object",
+      "properties": {
+        "titulo": { "type": "string" },
+        "disciplina": { "type": "string" },
+        "turmaId": { "type": "string" },
+        "dataAplicacao": { "type": "string", "format": "date-time" },
+        "questoes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "numero": { "type": "number" },
+              "gabarito": { "type": "string" },
+              "habilidadeBNCC": { "type": "string" }
+            },
+            "required": ["numero", "gabarito"]
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["titulo", "disciplina", "turmaId", "dataAplicacao", "createdAt", "createdBy"]
+    },
+    "RespostaAluno": {
+      "title": "RespostaAluno",
+      "description": "A student's answers for an assessment",
+      "type": "object",
+      "properties": {
+        "avaliacaoId": { "type": "string" },
+        "alunoId": { "type": "string" },
+        "respostas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "numero": { "type": "number" },
+              "resposta": { "type": "string" }
+            },
+            "required": ["numero", "resposta"]
+          }
+        },
+        "nota": { "type": "number" },
+        "status": { "type": "string", "enum": ["Salvo", "Pendente", "Erro"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["avaliacaoId", "alunoId", "respostas", "status", "createdAt", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Users collection"
+    },
+    "/turmas/{turmaId}": {
+      "schema": { "$ref": "#/entities/Turma" },
+      "description": "Classes collection"
+    },
+    "/alunos/{alunoId}": {
+      "schema": { "$ref": "#/entities/Aluno" },
+      "description": "Students collection"
+    },
+    "/avaliacoes/{avaliacaoId}": {
+      "schema": { "$ref": "#/entities/Avaliacao" },
+      "description": "Assessments collection"
+    },
+    "/respostas/{respostaId}": {
+      "schema": { "$ref": "#/entities/RespostaAluno" },
+      "description": "Student answers collection"
+    }
+  }
+}
