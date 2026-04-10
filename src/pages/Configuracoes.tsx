@@ -45,6 +45,7 @@ export default function Configuracoes() {
   const [newGabaritoDisciplina, setNewGabaritoDisciplina] = useState('');
   const [newGabaritoTurmaId, setNewGabaritoTurmaId] = useState('');
   const [newGabaritoRespostas, setNewGabaritoRespostas] = useState<string[]>(Array(10).fill(''));
+  const [newGabaritoBNCC, setNewGabaritoBNCC] = useState<string[]>(Array(10).fill(''));
   const [editingGabarito, setEditingGabarito] = useState<any | null>(null);
 
   // Fetch Turmas from Supabase
@@ -340,7 +341,8 @@ export default function Configuracoes() {
             titulo: newGabaritoTitulo,
             disciplina: newGabaritoDisciplina,
             turma_id: newGabaritoTurmaId,
-            respostas: newGabaritoRespostas
+            respostas: newGabaritoRespostas,
+            competencias: newGabaritoBNCC
           }
         ]);
 
@@ -375,7 +377,8 @@ export default function Configuracoes() {
           titulo: newGabaritoTitulo,
           disciplina: newGabaritoDisciplina,
           turma_id: newGabaritoTurmaId,
-          respostas: newGabaritoRespostas
+          respostas: newGabaritoRespostas,
+          competencias: newGabaritoBNCC
         })
         .eq('id', editingGabarito.id);
 
@@ -402,17 +405,20 @@ export default function Configuracoes() {
     setNewGabaritoDisciplina(gab.disciplina);
     setNewGabaritoTurmaId(gab.turma_id);
     setNewGabaritoRespostas(gab.respostas || []);
+    setNewGabaritoBNCC(gab.competencias || Array(gab.respostas?.length || 10).fill(''));
     // Scroll to top of form
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const addQuestion = () => {
     setNewGabaritoRespostas([...newGabaritoRespostas, '']);
+    setNewGabaritoBNCC([...newGabaritoBNCC, '']);
   };
 
   const removeLastQuestion = () => {
     if (newGabaritoRespostas.length > 1) {
       setNewGabaritoRespostas(newGabaritoRespostas.slice(0, -1));
+      setNewGabaritoBNCC(newGabaritoBNCC.slice(0, -1));
     }
   };
 
@@ -853,22 +859,43 @@ export default function Configuracoes() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
                 {newGabaritoRespostas.map((res, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-[#64748B] w-6">{(i + 1).toString().padStart(2, '0')}</span>
-                    <input 
-                      type="text" 
-                      maxLength={1} 
-                      value={res}
-                      onChange={(e) => {
-                        const newRes = [...newGabaritoRespostas];
-                        newRes[i] = e.target.value.toUpperCase();
-                        setNewGabaritoRespostas(newRes);
-                      }}
-                      className="form-input w-12 h-10 text-center uppercase font-bold text-[#0F2C59] rounded border-[#E2E8F0] focus:ring-[#0F2C59] bg-white" 
-                      placeholder="-" 
-                    />
+                  <div key={i} className="flex flex-col gap-2 p-3 bg-white border border-[#E2E8F0] rounded shadow-sm">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-[#0F2C59] bg-blue-50 px-2 py-0.5 rounded">Questão {(i + 1).toString().padStart(2, '0')}</span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-[#64748B] uppercase">Resposta</span>
+                        <input 
+                          type="text" 
+                          maxLength={1} 
+                          value={res}
+                          onChange={(e) => {
+                            const newRes = [...newGabaritoRespostas];
+                            newRes[i] = e.target.value.toUpperCase();
+                            setNewGabaritoRespostas(newRes);
+                          }}
+                          className="form-input w-full h-9 text-center uppercase font-bold text-[#0F2C59] rounded border-[#E2E8F0] focus:ring-[#0F2C59] bg-white text-sm" 
+                          placeholder="-" 
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-[#64748B] uppercase">Habilidade BNCC</span>
+                        <input 
+                          type="text" 
+                          value={newGabaritoBNCC[i] || ''}
+                          onChange={(e) => {
+                            const newBNCC = [...newGabaritoBNCC];
+                            newBNCC[i] = e.target.value.toUpperCase();
+                            setNewGabaritoBNCC(newBNCC);
+                          }}
+                          className="form-input w-full h-9 text-xs font-medium text-[#1A202C] rounded border-[#E2E8F0] focus:ring-[#0F2C59] bg-white" 
+                          placeholder="Ex: EF09MA01" 
+                        />
+                      </label>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -136,42 +136,89 @@ export default function MapaCalorBNCC() {
         setAlunos(students);
 
         // 4. Calculate mastery per skill
-        // Since we don't have a real mapping yet, we'll distribute questions among default skills
-        const skills: SkillMastery[] = defaultSkills.map((skill, skillIdx) => {
-          const studentMastery: Record<string, number> = {};
-          let totalCorrect = 0;
-          let totalPossible = 0;
+        // Use skills from gabarito if available, otherwise fallback to default
+        let skills: SkillMastery[] = [];
+        
+        if (currentGabarito.competencias && currentGabarito.competencias.some(c => c)) {
+          // Get unique skills from the gabarito
+          const uniqueSkillCodes = Array.from(new Set(currentGabarito.competencias.filter(c => c))) as string[];
+          
+          skills = uniqueSkillCodes.map(skillCode => {
+            const studentMastery: Record<string, number> = {};
+            let totalCorrect = 0;
+            let totalPossible = 0;
 
-          // Assign roughly 1/4 of questions to each skill for demo
-          const questionsForSkill = currentGabarito.respostas.map((_, i) => i)
-            .filter(i => i % defaultSkills.length === skillIdx);
+            // Find all question indices that map to this skill
+            const questionsForSkill = currentGabarito.competencias!
+              .map((code, idx) => code === skillCode ? idx : -1)
+              .filter(idx => idx !== -1);
 
-          students.forEach(student => {
-            let correctCount = 0;
-            questionsForSkill.forEach(qIdx => {
-              if (student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
-                correctCount++;
-              }
+            students.forEach(student => {
+              let correctCount = 0;
+              questionsForSkill.forEach(qIdx => {
+                if (student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
+                  correctCount++;
+                }
+              });
+              
+              const mastery = questionsForSkill.length > 0 
+                ? (correctCount / questionsForSkill.length) * 100 
+                : 0;
+              
+              studentMastery[student.id] = mastery;
+              totalCorrect += correctCount;
+              totalPossible += questionsForSkill.length;
             });
-            
-            const mastery = questionsForSkill.length > 0 
-              ? (correctCount / questionsForSkill.length) * 100 
-              : 0;
-            
-            studentMastery[student.id] = mastery;
-            totalCorrect += correctCount;
-            totalPossible += questionsForSkill.length;
+
+            const turmaMastery = totalPossible > 0 ? (totalCorrect / totalPossible) * 100 : 0;
+
+            return {
+              id: skillCode,
+              desc: `Habilidade ${skillCode}`,
+              fullDesc: `Análise detalhada da habilidade BNCC ${skillCode} conforme mapeado no gabarito oficial.`,
+              mastery: turmaMastery,
+              studentMastery,
+              turmaMastery: { [selectedTurmaId]: turmaMastery }
+            };
           });
+        } else {
+          // Fallback to default skills distributed among questions
+          skills = defaultSkills.map((skill, skillIdx) => {
+            const studentMastery: Record<string, number> = {};
+            let totalCorrect = 0;
+            let totalPossible = 0;
 
-          const turmaMastery = totalPossible > 0 ? (totalCorrect / totalPossible) * 100 : 0;
+            // Assign roughly 1/4 of questions to each skill for demo
+            const questionsForSkill = currentGabarito.respostas.map((_, i) => i)
+              .filter(i => i % defaultSkills.length === skillIdx);
 
-          return {
-            ...skill,
-            mastery: turmaMastery,
-            studentMastery,
-            turmaMastery: { [selectedTurmaId]: turmaMastery }
-          };
-        });
+            students.forEach(student => {
+              let correctCount = 0;
+              questionsForSkill.forEach(qIdx => {
+                if (student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
+                  correctCount++;
+                }
+              });
+              
+              const mastery = questionsForSkill.length > 0 
+                ? (correctCount / questionsForSkill.length) * 100 
+                : 0;
+              
+              studentMastery[student.id] = mastery;
+              totalCorrect += correctCount;
+              totalPossible += questionsForSkill.length;
+            });
+
+            const turmaMastery = totalPossible > 0 ? (totalCorrect / totalPossible) * 100 : 0;
+
+            return {
+              ...skill,
+              mastery: turmaMastery,
+              studentMastery,
+              turmaMastery: { [selectedTurmaId]: turmaMastery }
+            };
+          });
+        }
 
         setSkillsMastery(skills);
       } catch (err) {
