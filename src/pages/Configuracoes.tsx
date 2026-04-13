@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, BookOpen, FileText, Plus, Save, Trash2, Edit2, Loader2, AlertCircle } from 'lucide-react';
+import { Users, BookOpen, FileText, Plus, Save, Trash2, Edit2, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 
 interface Turma {
@@ -325,6 +325,15 @@ export default function Configuracoes() {
     }
   };
 
+  const resetGabaritoForm = () => {
+    setEditingGabarito(null);
+    setNewGabaritoTitulo('');
+    setNewGabaritoDisciplina('');
+    setNewGabaritoTurmaId('');
+    setNewGabaritoRespostas(Array(10).fill(''));
+    setNewGabaritoBNCC(Array(10).fill(''));
+  };
+
   const handleAddGabarito = async () => {
     if (!newGabaritoTitulo || !newGabaritoDisciplina || !newGabaritoTurmaId || newGabaritoRespostas.some(r => !r)) {
       alert('Preencha todos os campos e todas as respostas do gabarito.');
@@ -352,6 +361,7 @@ export default function Configuracoes() {
       setNewGabaritoDisciplina('');
       setNewGabaritoTurmaId('');
       setNewGabaritoRespostas(Array(10).fill(''));
+      setNewGabaritoBNCC(Array(10).fill(''));
       fetchGabaritos();
       alert('Gabarito salvo com sucesso!');
     } catch (err: any) {
@@ -384,11 +394,7 @@ export default function Configuracoes() {
 
       if (error) throw error;
 
-      setEditingGabarito(null);
-      setNewGabaritoTitulo('');
-      setNewGabaritoDisciplina('');
-      setNewGabaritoTurmaId('');
-      setNewGabaritoRespostas(Array(10).fill(''));
+      resetGabaritoForm();
       fetchGabaritos();
       alert('Gabarito atualizado com sucesso!');
     } catch (err: any) {
@@ -408,6 +414,18 @@ export default function Configuracoes() {
     setNewGabaritoBNCC(gab.competencias || Array(gab.respostas?.length || 10).fill(''));
     // Scroll to top of form
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDuplicateGabarito = (gab: any) => {
+    setEditingGabarito(null); // Ensure it's a new entry
+    setNewGabaritoTitulo(`${gab.titulo} (Cópia)`);
+    setNewGabaritoDisciplina(gab.disciplina);
+    setNewGabaritoTurmaId(''); // Force user to select a new turma
+    setNewGabaritoRespostas(gab.respostas || []);
+    setNewGabaritoBNCC(gab.competencias || Array(gab.respostas?.length || 10).fill(''));
+    // Scroll to top of form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    alert('Gabarito copiado! Agora selecione a nova Turma Alvo e salve.');
   };
 
   const addQuestion = () => {
@@ -788,18 +806,12 @@ export default function Configuracoes() {
               <h2 className="text-lg font-bold text-[#1A202C]">
                 {editingGabarito ? 'Editar Gabarito Oficial' : 'Lançamento de Gabarito Oficial'}
               </h2>
-              {editingGabarito && (
+              {(editingGabarito || newGabaritoTitulo || newGabaritoDisciplina || newGabaritoTurmaId) && (
                 <button 
-                  onClick={() => {
-                    setEditingGabarito(null);
-                    setNewGabaritoTitulo('');
-                    setNewGabaritoDisciplina('');
-                    setNewGabaritoTurmaId('');
-                    setNewGabaritoRespostas(Array(10).fill(''));
-                  }}
+                  onClick={resetGabaritoForm}
                   className="text-sm font-semibold text-[#DC2626] hover:underline"
                 >
-                  Cancelar Edição
+                  {editingGabarito ? 'Cancelar Edição' : 'Limpar Formulário'}
                 </button>
               )}
             </div>
@@ -902,18 +914,12 @@ export default function Configuracoes() {
             </div>
 
             <div className="flex justify-end mt-4 gap-3">
-              {editingGabarito && (
+              {(editingGabarito || newGabaritoTitulo || newGabaritoDisciplina || newGabaritoTurmaId) && (
                 <button 
-                  onClick={() => {
-                    setEditingGabarito(null);
-                    setNewGabaritoTitulo('');
-                    setNewGabaritoDisciplina('');
-                    setNewGabaritoTurmaId('');
-                    setNewGabaritoRespostas(Array(10).fill(''));
-                  }}
+                  onClick={resetGabaritoForm}
                   className="h-[42px] px-6 text-[#64748B] text-sm font-bold hover:bg-gray-100 rounded transition-colors"
                 >
-                  Cancelar
+                  {editingGabarito ? 'Cancelar' : 'Limpar'}
                 </button>
               )}
               <button 
@@ -948,6 +954,13 @@ export default function Configuracoes() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex justify-end gap-2">
+                            <button 
+                              onClick={() => handleDuplicateGabarito(gab)}
+                              className="p-1.5 text-gray-400 hover:text-[#059669] transition-colors" 
+                              title="Duplicar para outra turma"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
                             <button 
                               onClick={() => startEditingGabarito(gab)}
                               className="p-1.5 text-gray-400 hover:text-[#0F2C59] transition-colors" 

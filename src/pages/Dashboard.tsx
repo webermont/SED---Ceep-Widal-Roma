@@ -15,6 +15,7 @@ interface DashboardStats {
   desempenhoPorDisciplina: any[];
   distribuicaoPedagogica: any[];
   evolucaoMedia: any[];
+  participacao: number;
 }
 
 const COLORS = ['#0066CC', '#059669', '#D97706', '#DC2626'];
@@ -29,7 +30,8 @@ export default function Dashboard() {
     alertas: [],
     desempenhoPorDisciplina: [],
     distribuicaoPedagogica: [],
-    evolucaoMedia: []
+    evolucaoMedia: [],
+    participacao: 0
   });
 
   const fetchDashboardData = async () => {
@@ -100,6 +102,16 @@ export default function Dashboard() {
           media: Number((data.sum / data.count).toFixed(1))
         }));
 
+        // Participation Calculation
+        const { count: totalAlunosCount } = await supabase
+          .from('alunos')
+          .select('*', { count: 'exact', head: true });
+        
+        const uniqueStudentsInResponses = new Set(responses.map(r => r.alunos?.id)).size;
+        const participationRate = totalAlunosCount && totalAlunosCount > 0 
+          ? Math.round((uniqueStudentsInResponses / totalAlunosCount) * 100) 
+          : 0;
+
         setStats({
           mediaGeral: Number(media.toFixed(1)),
           alunosCriticos: Math.round(percentCritico),
@@ -107,7 +119,8 @@ export default function Dashboard() {
           alertas: responses.filter(r => (Number(r.nota) || 0) < 5).slice(0, 5),
           desempenhoPorDisciplina,
           distribuicaoPedagogica,
-          evolucaoMedia
+          evolucaoMedia,
+          participacao: participationRate
         });
       }
     } catch (err) {
@@ -194,7 +207,7 @@ export default function Dashboard() {
           </div>
           <div>
             <p className="text-xs font-bold text-[#64748B] uppercase tracking-wider mb-1">Participação</p>
-            <p className="text-3xl font-heading font-bold text-[#1A202C]">94%</p>
+            <p className="text-3xl font-heading font-bold text-[#1A202C]">{stats.participacao}%</p>
           </div>
         </div>
       </div>

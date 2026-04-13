@@ -15,6 +15,7 @@ interface Gabarito {
   disciplina: string;
   turma_id: string;
   respostas: string[];
+  turmas?: { nome: string };
 }
 
 interface RespostaRecente {
@@ -45,7 +46,7 @@ export default function ModuloCorrecao() {
       const supabase = getSupabase();
       
       // Fetch Gabaritos
-      const { data: gData } = await supabase.from('gabaritos').select('*');
+      const { data: gData } = await supabase.from('gabaritos').select('*, turmas(nome)');
       setGabaritos(gData || []);
 
       // Fetch Recent Entries
@@ -190,7 +191,14 @@ export default function ModuloCorrecao() {
           </label>
 
           <div className="flex flex-col gap-2">
-            <p className="text-[#1A202C] text-xs font-semibold uppercase tracking-wider">Selecionar Aluno</p>
+            <div className="flex items-center justify-between">
+              <p className="text-[#1A202C] text-xs font-semibold uppercase tracking-wider">Selecionar Aluno</p>
+              {selectedGabaritoId && (
+                <span className="text-[10px] font-bold bg-blue-50 text-[#0F2C59] px-2 py-0.5 rounded border border-blue-100 uppercase">
+                  Turma: {gabaritos.find(g => g.id === selectedGabaritoId)?.turmas?.nome || '...'}
+                </span>
+              )}
+            </div>
             <div className="relative">
               <input 
                 type="text" 

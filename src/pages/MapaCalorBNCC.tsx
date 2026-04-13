@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Download, X, Filter, Loader2, Info, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Download, X, Filter, Loader2, Info, FileText, CheckCircle2, BarChart2, Grid, User, AlertCircle, TrendingUp } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { clsx } from 'clsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { 
+  BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Cell 
+} from 'recharts';
 
 interface Turma {
   id: string;
@@ -52,6 +55,7 @@ export default function MapaCalorBNCC() {
     pedagogicalActions: true
   });
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [viewMode, setViewMode] = useState<'heatmap' | 'overview'>('heatmap');
   
   const heatmapRef = useRef<HTMLDivElement>(null);
   const performanceRef = useRef<HTMLDivElement>(null);
@@ -125,23 +129,54 @@ export default function MapaCalorBNCC() {
           `)
           .eq('gabarito_id', selectedGabaritoId);
 
-        if (rError) throw rError;
+        if (rError) {
+          console.error('Error fetching student responses:', rError);
+          setLoading(false);
+          return;
+        }
 
-        // 3. Map students
-        const students: AlunoPerformance[] = (rData || []).map((r: any) => ({
-          id: r.alunos.id,
-          nome: r.alunos.nome,
-          respostas: r.respostas
-        }));
+        console.log('Fetched student responses:', rData);
+
+        // 3. Map students - Add safety check for joined data
+        const students: AlunoPerformance[] = (rData || [])
+          .filter((r: any) => {
+            if (!r.alunos) {
+              console.warn(`Response ${r.id} has no associated student data. Check foreign key relationships.`);
+              return false;
+            }
+            return true;
+          })
+          .map((r: any) => ({
+            id: r.alunos.id,
+            nome: r.alunos.nome,
+            respostas: r.respostas
+          }));
+        
+        if (students.length === 0) {
+          console.warn('No student responses found for this gabarito.');
+          setAlunos([]);
+          setSkillsMastery([]);
+          setLoading(false);
+          return;
+        }
+
+        console.log('Mapped students for analysis:', students);
+
         setAlunos(students);
 
         // 4. Calculate mastery per skill
-        // Use skills from gabarito if available, otherwise fallback to default
         let skills: SkillMastery[] = [];
         
-        if (currentGabarito.competencias && currentGabarito.competencias.some(c => c)) {
+        // Ensure competencias is an array and has at least one non-empty value
+        const currentGab = gabaritos.find(g => g.id === selectedGabaritoId);
+        const competencias = currentGab?.competencias;
+        const hasCompetencias = Array.isArray(competencias) && competencias.some(c => c && typeof c === 'string' && c.trim() !== '');
+
+        if (hasCompetencias) {
           // Get unique skills from the gabarito
-          const uniqueSkillCodes = Array.from(new Set(currentGabarito.competencias.filter(c => c))) as string[];
+          const uniqueSkillCodes = Array.from(new Set(
+            (competencias as string[]).filter(c => c && typeof c === 'string' && c.trim() !== '')
+          ));
           
           skills = uniqueSkillCodes.map(skillCode => {
             const studentMastery: Record<string, number> = {};
@@ -156,7 +191,10 @@ export default function MapaCalorBNCC() {
             students.forEach(student => {
               let correctCount = 0;
               questionsForSkill.forEach(qIdx => {
-                if (student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
+                // Safety check for response index
+                if (student.respostas && 
+                    student.respostas[qIdx] !== undefined && 
+                    student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
                   correctCount++;
                 }
               });
@@ -195,7 +233,9 @@ export default function MapaCalorBNCC() {
             students.forEach(student => {
               let correctCount = 0;
               questionsForSkill.forEach(qIdx => {
-                if (student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
+                if (student.respostas && 
+                    student.respostas[qIdx] !== undefined && 
+                    student.respostas[qIdx] === currentGabarito.respostas[qIdx]) {
                   correctCount++;
                 }
               });
@@ -239,6 +279,31 @@ export default function MapaCalorBNCC() {
   };
 
   const selectedSkill = skillsMastery.find(s => s.id === selectedSkillId);
+
+  // Calculate overall student performance for this assessment
+  const studentStats = useMemo(() => {
+    if (alunos.length === 0 || skillsMastery.length === 0) return [];
+    
+    return alunos.map(aluno => {
+      let totalMastery = 0;
+      skillsMastery.forEach(skill => {
+        totalMastery += skill.studentMastery[aluno.id] || 0;
+      });
+      const average = totalMastery / skillsMastery.length;
+      return {
+        id: aluno.id,
+        nome: aluno.nome,
+        average: Math.round(average),
+        status: average < 50 ? 'Crítico' : average < 70 ? 'Básico' : average < 85 ? 'Adequado' : 'Avançado'
+      };
+    }).sort((a, b) => b.average - a.average);
+  }, [alunos, skillsMastery]);
+
+  const assessmentAverage = useMemo(() => {
+    if (skillsMastery.length === 0) return 0;
+    const sum = skillsMastery.reduce((acc, s) => acc + s.mastery, 0);
+    return Math.round(sum / skillsMastery.length);
+  }, [skillsMastery]);
 
   const handleExportReport = () => {
     if (skillsMastery.length === 0 || alunos.length === 0) {
@@ -408,7 +473,42 @@ export default function MapaCalorBNCC() {
         currentY = (pdf as any).lastAutoTable.finalY + 15;
       }
 
-      // --- 3. Pedagogical Actions ---
+      // --- 3. Student Performance Summary ---
+      if (pdfOptions.performance) {
+        if (currentY > pageHeight - 40) {
+          pdf.addPage();
+          currentY = 20;
+        }
+
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(14);
+        pdf.setTextColor(15, 44, 89);
+        pdf.text('3. Desempenho por Aluno', margin, currentY);
+
+        const studentRows = studentStats.map(s => [
+          s.nome,
+          `${s.average}%`,
+          s.status
+        ]);
+
+        autoTable(pdf, {
+          startY: currentY + 5,
+          head: [['Aluno', 'Domínio Médio', 'Status']],
+          body: studentRows,
+          theme: 'striped',
+          styles: { fontSize: 9 },
+          columnStyles: {
+            0: { fontStyle: 'bold', cellWidth: 'auto' },
+            1: { halign: 'center', fontStyle: 'bold', cellWidth: 30 },
+            2: { halign: 'center', fontStyle: 'bold', cellWidth: 30 }
+          },
+          margin: { left: margin, right: margin }
+        });
+
+        currentY = (pdf as any).lastAutoTable.finalY + 15;
+      }
+
+      // --- 4. Pedagogical Actions ---
       if (pdfOptions.pedagogicalActions) {
         if (currentY > pageHeight - 60) {
           pdf.addPage();
@@ -418,7 +518,7 @@ export default function MapaCalorBNCC() {
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(14);
         pdf.setTextColor(15, 44, 89);
-        pdf.text('3. Recomendações Pedagógicas', margin, currentY);
+        pdf.text('4. Recomendações Pedagógicas', margin, currentY);
         currentY += 10;
 
         const critical = skillsMastery.filter(s => s.mastery < 50);
@@ -505,6 +605,26 @@ export default function MapaCalorBNCC() {
             </select>
           </div>
           
+          {selectedGabaritoId && (
+            <div className={clsx(
+              "flex items-center gap-2 px-3 py-2 rounded border text-[10px] font-bold uppercase tracking-wider",
+              (() => {
+                const gab = gabaritos.find(g => g.id === selectedGabaritoId);
+                return Array.isArray(gab?.competencias) && gab.competencias.some(c => c && typeof c === 'string' && c.trim() !== '');
+              })()
+                ? "bg-green-50 border-green-200 text-[#059669]" 
+                : "bg-amber-50 border-amber-200 text-[#D97706]"
+            )}>
+              <CheckCircle2 className="w-3 h-3" />
+              {(() => {
+                const gab = gabaritos.find(g => g.id === selectedGabaritoId);
+                return Array.isArray(gab?.competencias) && gab.competencias.some(c => c && typeof c === 'string' && c.trim() !== '');
+              })()
+                ? "Mapeamento BNCC Ativo" 
+                : "Mapeamento Padrão (Demo)"}
+            </div>
+          )}
+          
           <div className="ml-auto flex items-center gap-4 text-[10px] font-bold text-[#64748B] bg-white px-3 py-2 border border-[#E2E8F0] rounded shadow-sm uppercase tracking-wider">
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[#DC2626] rounded-sm"></div> Crítico &lt;50%</div>
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[#D97706] rounded-sm"></div> Básico 50-70%</div>
@@ -512,103 +632,259 @@ export default function MapaCalorBNCC() {
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[#0066CC] rounded-sm"></div> Avançado &gt;85%</div>
           </div>
         </div>
+
+        {/* View Tabs */}
+        {selectedGabaritoId && (
+          <div className="flex gap-1 mt-6 border-b border-[#E2E8F0]">
+            <button 
+              onClick={() => setViewMode('heatmap')}
+              className={clsx(
+                "px-6 py-2.5 text-sm font-bold flex items-center gap-2 transition-all border-b-2",
+                viewMode === 'heatmap' 
+                  ? "border-[#0F2C59] text-[#0F2C59] bg-blue-50/50" 
+                  : "border-transparent text-[#64748B] hover:text-[#1A202C] hover:bg-gray-50"
+              )}
+            >
+              <Grid className="w-4 h-4" />
+              Mapa de Calor (Matriz)
+            </button>
+            <button 
+              onClick={() => setViewMode('overview')}
+              className={clsx(
+                "px-6 py-2.5 text-sm font-bold flex items-center gap-2 transition-all border-b-2",
+                viewMode === 'overview' 
+                  ? "border-[#0F2C59] text-[#0F2C59] bg-blue-50/50" 
+                  : "border-transparent text-[#64748B] hover:text-[#1A202C] hover:bg-gray-50"
+              )}
+            >
+              <BarChart2 className="w-4 h-4" />
+              Visão Geral (Gráficos)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Heatmap Content Area */}
       <div className="flex-1 overflow-auto p-6 bg-[#F4F6F8] flex flex-col">
         {selectedGabaritoId ? (
-          <div className="flex flex-1 min-h-0">
-            {/* Matrix Container */}
-            <div ref={heatmapRef} className="bg-white border border-[#E2E8F0] rounded shadow-sm overflow-hidden flex flex-col flex-1 min-w-0">
-              {loading ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#0F2C59]" />
-                  <p className="text-sm font-medium text-[#64748B]">Calculando matriz de domínio...</p>
+          <div className="flex flex-1 min-h-0 gap-6">
+            {/* Main Content Area */}
+            <div className="flex-1 flex flex-col min-w-0 gap-6">
+              {/* Summary Cards (Only in Overview or at top) */}
+              {viewMode === 'overview' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+                  <div className="bg-white p-5 rounded border border-[#E2E8F0] shadow-sm">
+                    <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest mb-1">Média da Avaliação</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className={clsx("text-3xl font-bold", 
+                        assessmentAverage < 50 ? "text-[#DC2626]" : 
+                        assessmentAverage < 70 ? "text-[#D97706]" : 
+                        assessmentAverage < 85 ? "text-[#059669]" : "text-[#0066CC]"
+                      )}>{assessmentAverage}%</span>
+                      <span className="text-xs text-[#64748B] font-medium">Domínio Geral</span>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded border border-[#E2E8F0] shadow-sm">
+                    <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest mb-1">Alunos Analisados</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-[#1A202C]">{alunos.length}</span>
+                      <span className="text-xs text-[#64748B] font-medium">Estudantes</span>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded border border-[#E2E8F0] shadow-sm">
+                    <p className="text-[10px] font-bold text-[#64748B] uppercase tracking-widest mb-1">Habilidades BNCC</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-[#1A202C]">{skillsMastery.length}</span>
+                      <span className="text-xs text-[#64748B] font-medium">Mapeadas</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewMode === 'heatmap' ? (
+                <div ref={heatmapRef} className="bg-white border border-[#E2E8F0] rounded shadow-sm overflow-hidden flex flex-col flex-1 min-w-0">
+                  {loading ? (
+                    <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                      <Loader2 className="w-8 h-8 animate-spin text-[#0F2C59]" />
+                      <p className="text-sm font-medium text-[#64748B]">Calculando matriz de domínio...</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Matrix Header (X-Axis) */}
+                      <div className="flex border-b border-[#E2E8F0] bg-gray-50 min-w-max sticky top-0 z-20 shadow-sm">
+                        <div className="w-48 shrink-0 p-3 flex items-center justify-start border-r border-[#E2E8F0] sticky left-0 bg-gray-50 z-30">
+                          <span className="text-xs font-bold text-[#64748B] uppercase tracking-widest">Habilidades BNCC</span>
+                        </div>
+                        {/* Columns: Classes */}
+                        <div className="flex">
+                          <div className="w-[60px] h-[80px] flex items-end justify-center pb-3 border-r border-[#E2E8F0] bg-blue-50/50">
+                            <span className="text-[10px] font-bold text-[#0F2C59] -rotate-90 whitespace-nowrap origin-bottom uppercase tracking-tighter">Média Turma</span>
+                          </div>
+                          {/* Separator */}
+                          <div className="w-4 bg-gray-100 border-r border-[#E2E8F0]"></div>
+                          {/* Columns: Students */}
+                          {alunos.map(aluno => (
+                            <div key={aluno.id} className="w-[40px] h-[80px] flex items-end justify-center pb-3 border-r border-gray-200">
+                              <span className="text-[9px] font-bold text-[#64748B] -rotate-90 whitespace-nowrap origin-bottom uppercase truncate max-w-[60px]">{aluno.nome}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Matrix Body */}
+                      <div className="overflow-auto min-w-max flex-1 relative">
+                        {skillsMastery.map((skill) => (
+                          <div key={skill.id} className={clsx(
+                            "flex border-b border-[#E2E8F0] transition-colors",
+                            selectedSkillId === skill.id ? "bg-blue-50/30" : "hover:bg-gray-50"
+                          )}>
+                            <div 
+                              className={clsx(
+                                "w-48 shrink-0 px-3 py-2 flex flex-col justify-center border-r border-[#E2E8F0] sticky left-0 z-10 cursor-pointer border-l-2",
+                                selectedSkillId === skill.id ? "bg-blue-50 border-l-[#0F2C59]" : "bg-white border-l-transparent hover:border-l-[#0F2C59]"
+                              )}
+                              onClick={() => setSelectedSkillId(skill.id)}
+                            >
+                              <span className={clsx("text-sm font-bold", selectedSkillId === skill.id ? "text-[#0F2C59]" : "text-[#1A202C]")}>{skill.id}</span>
+                              <span className="text-[10px] text-[#64748B] truncate font-medium">{skill.desc}</span>
+                            </div>
+                            <div className="flex">
+                              {/* Turma Mastery Cell */}
+                              <div 
+                                className={clsx(
+                                  "w-[60px] h-[44px] flex items-center justify-center text-[10px] font-bold text-white relative cursor-pointer border-r border-[#E2E8F0]",
+                                  getHeatmapColor(skill.mastery)
+                                )}
+                                title={`Média Turma: ${Math.round(skill.mastery)}%`}
+                              >
+                                {Math.round(skill.mastery)}%
+                              </div>
+                              <div className="w-4 bg-gray-50 border-r border-[#E2E8F0] border-l border-[#E2E8F0]"></div>
+                              {/* Student Mastery Cells */}
+                              {alunos.map(aluno => {
+                                const mastery = skill.studentMastery[aluno.id] || 0;
+                                return (
+                                  <div 
+                                    key={aluno.id}
+                                    className={clsx(
+                                      "w-[40px] h-[44px] flex items-center justify-center text-[9px] font-bold text-transparent hover:text-white hover:border-2 hover:border-[#1A202C] hover:z-10 relative cursor-pointer border-r border-gray-100",
+                                      getHeatmapColor(mastery)
+                                    )}
+                                    title={`${aluno.nome}: ${Math.round(mastery)}%`}
+                                  >
+                                    {Math.round(mastery)}%
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                        {skillsMastery.length === 0 && (
+                          <div className="p-12 text-center flex flex-col items-center justify-center gap-4">
+                            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                              <Info className="w-6 h-6 text-[#64748B]" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-[#1A202C]">Nenhum dado pedagógico encontrado</p>
+                              <p className="text-xs text-[#64748B] mt-1 max-w-xs mx-auto">
+                                Certifique-se de que os alunos já realizaram esta avaliação e que as respostas foram lançadas no <strong>Módulo de Correção</strong>.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
-                <>
-                  {/* Matrix Header (X-Axis) */}
-                  <div className="flex border-b border-[#E2E8F0] bg-gray-50 min-w-max sticky top-0 z-20 shadow-sm">
-                    <div className="w-48 shrink-0 p-3 flex items-center justify-start border-r border-[#E2E8F0] sticky left-0 bg-gray-50 z-30">
-                      <span className="text-xs font-bold text-[#64748B] uppercase tracking-widest">Habilidades BNCC</span>
-                    </div>
-                    {/* Columns: Classes */}
-                    <div className="flex">
-                      <div className="w-[60px] h-[80px] flex items-end justify-center pb-3 border-r border-[#E2E8F0] bg-blue-50/50">
-                        <span className="text-[10px] font-bold text-[#0F2C59] -rotate-90 whitespace-nowrap origin-bottom uppercase tracking-tighter">Média Turma</span>
-                      </div>
-                      {/* Separator */}
-                      <div className="w-4 bg-gray-100 border-r border-[#E2E8F0]"></div>
-                      {/* Columns: Students */}
-                      {alunos.map(aluno => (
-                        <div key={aluno.id} className="w-[40px] h-[80px] flex items-end justify-center pb-3 border-r border-gray-200">
-                          <span className="text-[9px] font-bold text-[#64748B] -rotate-90 whitespace-nowrap origin-bottom uppercase truncate max-w-[60px]">{aluno.nome}</span>
-                        </div>
-                      ))}
+                <div className="flex flex-col gap-6 flex-1">
+                  {/* Charts Row */}
+                  <div className="bg-white border border-[#E2E8F0] rounded shadow-sm p-6 flex flex-col h-[400px]">
+                    <h3 className="text-sm font-bold text-[#1A202C] uppercase tracking-widest mb-6 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-[#0F2C59]" /> Domínio por Habilidade (Turma)
+                    </h3>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ReBarChart data={skillsMastery} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                          <XAxis dataKey="id" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} />
+                          <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} />
+                          <ReTooltip 
+                            cursor={{ fill: '#F8FAFC' }}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar dataKey="mastery" radius={[4, 4, 0, 0]} barSize={40}>
+                            {skillsMastery.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={
+                                entry.mastery < 50 ? '#DC2626' : 
+                                entry.mastery < 70 ? '#D97706' : 
+                                entry.mastery < 85 ? '#059669' : '#0066CC'
+                              } />
+                            ))}
+                          </Bar>
+                        </ReBarChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
 
-                  {/* Matrix Body */}
-                  <div className="overflow-auto min-w-max flex-1 relative">
-                    {skillsMastery.map((skill) => (
-                      <div key={skill.id} className={clsx(
-                        "flex border-b border-[#E2E8F0] transition-colors",
-                        selectedSkillId === skill.id ? "bg-blue-50/30" : "hover:bg-gray-50"
-                      )}>
-                        <div 
-                          className={clsx(
-                            "w-48 shrink-0 px-3 py-2 flex flex-col justify-center border-r border-[#E2E8F0] sticky left-0 z-10 cursor-pointer border-l-2",
-                            selectedSkillId === skill.id ? "bg-blue-50 border-l-[#0F2C59]" : "bg-white border-l-transparent hover:border-l-[#0F2C59]"
-                          )}
-                          onClick={() => setSelectedSkillId(skill.id)}
-                        >
-                          <span className={clsx("text-sm font-bold", selectedSkillId === skill.id ? "text-[#0F2C59]" : "text-[#1A202C]")}>{skill.id}</span>
-                          <span className="text-[10px] text-[#64748B] truncate font-medium">{skill.desc}</span>
-                        </div>
-                        <div className="flex">
-                          {/* Turma Mastery Cell */}
-                          <div 
-                            className={clsx(
-                              "w-[60px] h-[44px] flex items-center justify-center text-[10px] font-bold text-white relative cursor-pointer border-r border-[#E2E8F0]",
-                              getHeatmapColor(skill.mastery)
-                            )}
-                            title={`Média Turma: ${Math.round(skill.mastery)}%`}
-                          >
-                            {Math.round(skill.mastery)}%
-                          </div>
-                          <div className="w-4 bg-gray-50 border-r border-[#E2E8F0] border-l border-[#E2E8F0]"></div>
-                          {/* Student Mastery Cells */}
-                          {alunos.map(aluno => {
-                            const mastery = skill.studentMastery[aluno.id] || 0;
-                            return (
-                              <div 
-                                key={aluno.id}
-                                className={clsx(
-                                  "w-[40px] h-[44px] flex items-center justify-center text-[9px] font-bold text-transparent hover:text-white hover:border-2 hover:border-[#1A202C] hover:z-10 relative cursor-pointer border-r border-gray-100",
-                                  getHeatmapColor(mastery)
-                                )}
-                                title={`${aluno.nome}: ${Math.round(mastery)}%`}
-                              >
-                                {Math.round(mastery)}%
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                    {skillsMastery.length === 0 && (
-                      <div className="p-12 text-center text-[#64748B] font-medium">
-                        Nenhum dado pedagógico disponível para esta avaliação.
-                      </div>
-                    )}
+                  {/* Student Ranking Table */}
+                  <div className="bg-white border border-[#E2E8F0] rounded shadow-sm overflow-hidden flex flex-col">
+                    <div className="px-6 py-4 border-b border-[#E2E8F0] bg-gray-50">
+                      <h3 className="text-sm font-bold text-[#1A202C] uppercase tracking-widest flex items-center gap-2">
+                        <User className="w-4 h-4 text-[#0F2C59]" /> Desempenho por Aluno
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#E2E8F0]">
+                            <th className="px-6 py-3 text-[10px] font-bold text-[#64748B] uppercase tracking-wider">Aluno</th>
+                            <th className="px-6 py-3 text-[10px] font-bold text-[#64748B] uppercase tracking-wider text-center">Domínio Médio</th>
+                            <th className="px-6 py-3 text-[10px] font-bold text-[#64748B] uppercase tracking-wider text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E2E8F0]">
+                          {studentStats.map((student) => (
+                            <tr key={student.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 text-sm font-bold text-[#1A202C]">{student.nome}</td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center justify-center gap-3">
+                                  <div className="w-24 bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                                    <div 
+                                      className={clsx("h-full", 
+                                        student.average < 50 ? "bg-[#DC2626]" : 
+                                        student.average < 70 ? "bg-[#D97706]" : 
+                                        student.average < 85 ? "bg-[#059669]" : "bg-[#0066CC]"
+                                      )}
+                                      style={{ width: `${student.average}%` }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-xs font-bold text-[#1A202C] w-8">{student.average}%</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <span className={clsx(
+                                  "px-2 py-1 rounded text-[10px] font-bold uppercase border",
+                                  student.average < 50 ? "bg-red-50 text-[#DC2626] border-red-100" : 
+                                  student.average < 70 ? "bg-amber-50 text-[#D97706] border-amber-100" : 
+                                  student.average < 85 ? "bg-green-50 text-[#059669] border-green-100" : "bg-blue-50 text-[#0066CC] border-blue-100"
+                                )}>
+                                  {student.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </>
+                </div>
               )}
             </div>
 
             {/* Collapsible Right Panel (Skill Legend) */}
             {selectedSkillId && selectedSkill && (
-              <div className="w-80 ml-6 bg-white border border-[#E2E8F0] rounded shadow-sm flex flex-col shrink-0 overflow-hidden">
+              <div className="w-80 bg-white border border-[#E2E8F0] rounded shadow-sm flex flex-col shrink-0 overflow-hidden sticky top-6 h-fit max-h-[calc(100vh-200px)]">
                 <div className="p-4 border-b border-[#E2E8F0] flex justify-between items-center bg-gray-50">
                   <h3 className="text-sm font-bold text-[#1A202C] uppercase tracking-widest">Detalhamento BNCC</h3>
                   <button 
@@ -649,6 +925,25 @@ export default function MapaCalorBNCC() {
                           ></div>
                         </div>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Students needing attention */}
+                  <div className="mt-8 border-t border-[#E2E8F0] pt-5">
+                    <h4 className="text-xs font-bold text-[#DC2626] uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <AlertCircle className="w-3 h-3" /> Alunos com Dificuldade
+                    </h4>
+                    <div className="space-y-2">
+                      {alunos.filter(a => (selectedSkill.studentMastery[a.id] || 0) < 50).length > 0 ? (
+                        alunos.filter(a => (selectedSkill.studentMastery[a.id] || 0) < 50).map(a => (
+                          <div key={a.id} className="flex items-center justify-between p-2 bg-red-50 rounded border border-red-100">
+                            <span className="text-xs font-medium text-[#DC2626] truncate max-w-[120px]">{a.nome}</span>
+                            <span className="text-[10px] font-bold text-[#DC2626]">{Math.round(selectedSkill.studentMastery[a.id] || 0)}%</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-[10px] text-[#64748B] italic">Nenhum aluno no nível crítico para esta habilidade.</p>
+                      )}
                     </div>
                   </div>
 
